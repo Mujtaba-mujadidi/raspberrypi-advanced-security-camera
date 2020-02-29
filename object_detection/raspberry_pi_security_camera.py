@@ -19,25 +19,30 @@ sys.path.append('..')
 from utils import label_map_util
 from utils import visualization_utils as vis_util
 
-print("Imprt success!")
+print("Packages import success!")
 
 
 #Name of the object detection pre trained model used
-ObjectDetectionModelName = 'ssdlite_mobilenet_v2_coco_2018_05_09'
+MODEL_NAME = 'ssdlite_mobilenet_v2_coco_2018_05_09'
+
+IM_WIDTH = 540    #Use smaller resolution for
+IM_HEIGHT = 380   #slightly faster framerate
+
 
 #Current working director path
-currentWorkingDirectoryPath = os.getcwd()
+CWD_PATH = os.getcwd()
 
 #Frozen detection graph .pb file path. it has the model that will be used for object detection
-frozenDetectionGraphPath = os.path.join(currentWorkingDirectoryPath, ObjectDetectionModelName, 'frozen_inference_graph.pb') 
+#frozenDetectionGraphPath = os.path.join(currentWorkingDirectoryPath, ObjectDetectionModelName, 'frozen_inference_graph.pb') 
+PATH_TO_CKPT = os.path.join(CWD_PATH,MODEL_NAME,'frozen_inference_graph.pb')
 
 #90 classes of object can be detected by the model.
-numberOfClasses = 90;
+NUM_CLASSES = 90
 
 # Labels map file path
-labelsPath = os.path.join(currentWorkingDirectoryPath, 'data', 'mscoco_label_map.pbtxt')
+PATH_TO_LABELS = os.path.join(CWD_PATH,'data','mscoco_label_map.pbtxt')
 
-
+print("Paths initialisation success!")
 
 # Label maps map indices to category names, so that when the convolution
 # network predicts `5`, we know that this corresponds to `airplane`.
@@ -48,77 +53,156 @@ labelsPath = os.path.join(currentWorkingDirectoryPath, 'data', 'mscoco_label_map
 #Loads labels map
 #Converst label map into list of categories
 #converts list of categories into a dictionary
-labelsMap = label_map_util.load_labelmap(labelsPath)
-categories = label_map_util.convert_label_map_to_categories(labelsMap, max_num_classes=numberOfClasses, use_display_name=True)
-categoriesIndex = label_map_util.create_category_index(categories)
+label_map = label_map_util.load_labelmap(PATH_TO_LABELS)
+categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=NUM_CLASSES, use_display_name=True)
+category_index = label_map_util.create_category_index(categories)
 
-
+print("Labels Mapping success!")
 
 # Load the Tensorflow model into memory
-detectionGraph = tf.Graph()
-with detectionGraph.as_default():
-    objectDetectionGraphDefinition = tf.GraphDef()
-    with tf.gfile.GFile(frozenDetectionGraphPath, 'rb') as fid:
-        serialisedGraph = fid.read()
-        objectDetectionGraphDefinition.ParseFromString(serialisedGraph)
-        tf.import_graph_def(objectDetectionGraphDefinition,name='')
-    session = tf.Session(graph = detectionGraph)
+detection_graph = tf.Graph()
+with detection_graph.as_default():
+    od_graph_def = tf.GraphDef()
+    with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
+        serialized_graph = fid.read()
+        od_graph_def.ParseFromString(serialized_graph)
+        tf.import_graph_def(od_graph_def, name='')
+
+    sess = tf.Session(graph=detection_graph)
+
+print("Loading detection model success!")
+
+#Input data for the model is image
+image_tensor = detection_graph.get_tensor_by_name('image_tensor:0')
+
+#Output data from the model is list of detectio boxes, classs and scores
+
+detection_boxes = detection_graph.get_tensor_by_name('detection_boxes:0')
+detection_scores = detection_graph.get_tensor_by_name('detection_scores:0')
+detection_classes = detection_graph.get_tensor_by_name('detection_classes:0')
+
+# Number of objects detected
+num_detections = detection_graph.get_tensor_by_name('num_detections:0')
+
+print("Input output type intialisation sucess!")
+
+# Number of objects detected
+#detectionCount = detection_graph.get_tensor_by_name('num_detections:0')
+
+#Frame rate calculation
+frame_rate_calc = 1
+freq = cv2.getTickFrequency()
+font = cv2.FONT_HERSHEY_SIMPLEX
+
+print("Frame rate assignment")
+
+#Camera initialisation
+
+
+
+#Sensor initialisation
+GPIO.setmode(GPIO.BCM)
+PIR_PIN = 7
+GPIO.setup(PIR_PIN, GPIO.IN)
+
+print ("PIR module test (CTR+C to exit)")
+
+def detect():
+    print("Detecting")
+    camera = PiCamera()
+    camera.resolution = (IM_WIDTH,IM_HEIGHT)
+    camera.framerate = 10
+    rawCapture = PiRGBArray(camera, size=(IM_WIDTH,IM_HEIGHT))
+    rawCapture.truncate(0)
+
+    for frame1 in camera.capture_continuous(rawCapture, format="bgr",use_video_port=True):
+
+        t1 = cv2.getTickCount()
+        
+        # Acquire frame and expand frame dimensions to have shape: [1, None, None, 3]
+        # i.e. a single-column array, where each item in the column has the pixel RGB value
+        frame = np.copy(frame1.array)
+        frame.setflags(write=1)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame_expanded = np.expand_dims(frame_rgb, axis=0)
+
+        # Perform the actual detection by running the model with the image as input
+        (boxes, scores, classes, num) = sess.run(
+            [detection_boxes, detection_scores, detection_classes, num_detections],
+            feed_dict={image_tensor: frame_expanded})
+        
+        
+        #print(object_id_to_class_mapper[classes[0]])
+        print(classes)
+        print("--------------------------------")
+        # Draw the results of the detection (aka 'visulaize the results')
+        vis_util.visualize_boxes_and_labels_on_image_array(
+            frame,
+            np.squeeze(boxes),
+            np.squeeze(classes).astype(np.int32),
+            np.squeeze(scores),
+            category_index,
+            use_normalized_coordinates=True,
+            line_thickness=8,
+            min_score_thresh=0.40)
+        
+      
+        
         
 
-#input data for the model is image
-imageSensor = detectionGraph.get_tensor_by_name('image-tensor:0')
+        cv2.putText(frame,"FPS: {0:.2f}".format(1),(30,50),font,1,(255,255,0),2,cv2.LINE_AA)
 
-#output data from the model is list of detectio boxes, classs and scores.
-detectionBoxes = detectionGraph.get_tensor-by_name('detection-boxes:0')
-detectionClasses = detectionGraph.get_tensor-by_name('detection-classes:0')
-detectionScores = detectionGraph.get_tensor-by_name('detection-score:0')
+        # All the results have been drawn on the frame, so it's time to display it.
+        cv2.imshow('Object detector', frame)
 
+        t2 = cv2.getTickCount()
+        time1 = (t2-t1)/freq
+        frame_rate_calc = 1/time1
 
+        # Press 'q' to quit
+        if cv2.waitKey(1) == ord('q'):
+            break
 
+        rawCapture.truncate(0)
 
+    camera.close()
 
+    cv2.destroyAllWindows()
 
-
-
-
-
-
-
-
-
-
-
-
-
-def load_ssdlite_mobilenet():
-    print ("loading model")
-
+    
+'''
 def detectObjects():
-    print("Detecting objects")
-    return "list of objetcs"
+    print("Object detecion called")
+    rawCapture = PiRGBArray(camera, size=(frameWidth,frameheight))
+    rawCapture.truncate(0)
+    for frame in camera.capture_continuous(rawCapture, format="bgr",use_video_port=True):
+        t1 = cv2.getTickCount()
+    
+        # Acquire frame and expand frame dimensions to have shape: [1, None, None, 3]
+        # i.e. a single-column array, where each item in the column has the pixel RGB value
+        frame = np.copy(frame.array)
+        frame.setflags(write=1)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame_expanded = np.expand_dims(frame_rgb, axis=0)
+        
+        # Perform the actual detection by running the model with the image as input
+        (boxes, scores, classes, num) = sess.run(
+            [detection_boxes, detection_scores, detection_classes, num_detections],
+            feed_dict={image_tensor: frame_expanded})
+
+        print(classes)
+        rawCapture.truncate(0)
+    
+    print ("list of objetcs")
+
+'''
+
 
 def startRecording():
     print("Recording")
     
 def stopRecording():
     print ("Not Recording")
-
-
-#def startDetectingObjects():
-    
-
-
-
-load_ssdlite_mobilenet()
-
-
-
-
-
-camera = PiCamera()
-IM_WIDTH = 640
-IM_HEIGHT = 720
-camera.resolution = (IM_WIDTH, IM_HEIGHT)
 
 
 GPIO.setmode(GPIO.BCM)
@@ -129,24 +213,35 @@ GPIO.setup(PIR_PIN, GPIO.IN)
 
 print ("PIR module test (CTR+C to exit)")
 
-time.sleep(2)
+#time.sleep(2)
 
+detection = False
+recording = False
+
+detect()
+
+'''
 while True:
     print("---------------------------------------------------")
-    detection = False
     if GPIO.input(PIR_PIN):
-        startRecording()
+        if recording == False:
+            startRecording()
+            recording = True
+            
         if detection == False:
-            objetcts = detectObjects()
+            detectObjects()
             detection = True
+            
     else:
         stopRecording()
+        recording = False
         detection = False
-            
         
-    time.sleep(10)
+        
+    time.sleep(5)
 
-camera.stop_preview();
+#camera.stop_preview();
+'''
 print("Execution success")
 
 
