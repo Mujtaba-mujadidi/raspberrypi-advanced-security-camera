@@ -35,8 +35,12 @@ FIREBASE_CONFIG = {
 
 firebase = pyrebase.initialize_app(FIREBASE_CONFIG)
 database = firebase.database()
-fireStore = firebase.storage();
+firebaseStorage = firebase.storage();
 
+user = firebase.auth().sign_in_with_email_and_password("r@g.com","123456")
+
+
+print("Firebase login success: "+user['localId'])
 print("Packages import success!")
 
 
@@ -61,12 +65,6 @@ numberOfClasses = 90
 labelsPath = os.path.join(currentWorkingDirectoryPath,'data','mscoco_label_map.pbtxt')
 
 print("Paths initialisation success!")
-
-# Label maps map indices to category names, so that when the convolution
-# network predicts `5`, we know that this corresponds to `airplane`.
-# Here we use internal utility functions, but anything that returns a
-# dictionary mapping integers to appropriate string labels would be fine
-
 
 #Loads labels map
 #Converst label map into list of categories
@@ -93,8 +91,7 @@ print("Loading detection model success!")
 #Input data for the model is image
 image_tensor = detectionGraph.get_tensor_by_name('image_tensor:0')
 
-#Output data from the model is list of detectio boxes, classs and scores
-
+#Output data from the model is list of detection boxes, classs and scores
 detectionBoxes = detectionGraph.get_tensor_by_name('detection_boxes:0')
 detectionScores = detectionGraph.get_tensor_by_name('detection_scores:0')
 detectionClasses = detectionGraph.get_tensor_by_name('detection_classes:0')
@@ -104,19 +101,12 @@ numberOfDetections = detectionGraph.get_tensor_by_name('num_detections:0')
 
 print("Input output type intialisation sucess!")
 
-# Number of objects detected
-#detectionCount = detectionGraph.get_tensor_by_name('num_detections:0')
-
 #Frame rate calculation
 frameRateCalculation = 1
 freq = cv2.getTickFrequency()
 font = cv2.FONT_HERSHEY_SIMPLEX
 
 print("Frame rate assignment")
-
-#Camera initialisation
-
-
 
 #Sensor initialisation
 GPIO.setmode(GPIO.BCM)
@@ -137,13 +127,11 @@ def detect():
     global camera
     listOfDectedobjects = []
     
-    print("Detection method called")
+    print("Detection method called\Initialising the model...")
    
     rawCapture = PiRGBArray(camera, size=(cameraFrameWidth,cameraFrameHeight))
     rawCapture.truncate(0)
-    
-    print("Checking the if condition inside detectio method!")
-    
+        
     timeInMilliSeconds = 0
 
     if isFirstDetectionInThisSession == True:
@@ -151,7 +139,7 @@ def detect():
     else:
         timeInMilliSeconds = int(round(time.time() * 1000)) + 10000 #10 secinds from now. shorter time as subsequent calls are faster
         
-    print("Start Detecting")
+    print("Detection started...")
     for frame1 in camera.capture_continuous(rawCapture, format="bgr",use_video_port=True):
 
         t1 = cv2.getTickCount()
@@ -171,40 +159,10 @@ def detect():
         #global categoryIndex
         #print(object_id_to_class_mapper[classes[0]])
         listOfDectedobjects.append(categoryIndex[1]["name"])
-        #print(boxes)
-        #print("--------------------------------")
-        # Draw the results of the detection (aka 'visulaize the results')
-        '''
-        vis_util.visualize_boxes_and_labels_on_image_array(
-            frame,
-            np.squeeze(boxes),
-            np.squeeze(classes).astype(np.int32),
-            np.squeeze(scores),
-            categoryIndex,
-            use_normalized_coordinates=True,
-            line_thickness=8,
-            min_score_thresh=0.40)
         
-      
-        
-        
-
-        cv2.putText(frame,"FPS: {0:.2f}".format(1),(30,50),font,1,(255,255,0),2,cv2.LINE_AA)
-
-        # All the results have been drawn on the frame, so it's time to display it.
-        cv2.imshow('Object detector', frame)
-
-        t2 = cv2.getTickCount()
-        time1 = (t2-t1)/freq
-        frameRateCalculation = 1/time1
-
-        # Press 'q' to quit
-        if cv2.waitKey(1) == ord('q'):
-            break
-        '''
         if (int(round(time.time()*1000))) >= timeInMilliSeconds :
             isFirstDetectionInThisSession = False
-            print ("Exiting detection")
+            print ("Exiting detection...")
             break;
         rawCapture.truncate(0)
         
@@ -239,6 +197,7 @@ recording = False
 
 listOfDectedobjects = [];
 currentDateTimeString = ""
+fileName = ""
 while True:
     if GPIO.input(PIR_PIN):
         print("movement detected!")
@@ -246,15 +205,16 @@ while True:
             print("start recording")
             currentDateTime = datetime.now()
             currentDateTimeString = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            camera.start_recording('/home/pi/Desktop/prj2019/videos/'+currentDateTimeString+".h264")
+            fileName = currentDateTimeString+".h264"
+            camera.start_recording('/home/pi/Desktop/prj2019/videos/'+fileName)
             
             recording = True
             
         if detection == False:
-            listOfDectedobjects = detect();
+            listOfDectedobjects = detect(); 
             print(listOfDectedobjects)
             listOfDectedobjects = list(set(listOfDectedobjects))
-            print(listOfDectedobjects)
+            listOfDetectedObjectsString = ','.join(listOfDectedobjects)
             detection = True
           #  time.sleep(10)
         
@@ -264,15 +224,13 @@ while True:
         print("Stop recording")
         if recording == True:
             camera.stop_recording()
+            firebaseStorage.child(user['localId']).child(currentDateTimeString).put("../videos/"+fileName)
+            os.remove("../videos/"+fileName)
             recording = False
         
         if detection == True:
-            user = firebase.auth().sign_in_with_email_and_password("r@g.com","123456")
-            database.child(user['localId']).push({"incedentDateAndtime":currentDateTimeString, "detectedObjects":listOfDectedobjects})
+            database.child(user['localId']).push({"incedentDateAndtime":currentDateTimeString, "detectedObjects":listOfDetectedObjectsString})
             detection = False
-        
-        
-    #time.sleep(5)
 
 #camera.stop_preview();
 print("Execution success")
