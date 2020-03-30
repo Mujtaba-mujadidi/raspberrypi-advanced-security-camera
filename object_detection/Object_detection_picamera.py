@@ -147,6 +147,7 @@ if camera_type == 'picamera':
         
         
         #print(object_id_to_class_mapper[classes[0]])
+        print("Printing classes:", classes)
         
         # Draw the results of the detection (aka 'visulaize the results')
         vis_util.visualize_boxes_and_labels_on_image_array(
