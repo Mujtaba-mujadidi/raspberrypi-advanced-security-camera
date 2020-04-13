@@ -13,6 +13,10 @@ from picamera import PiCamera
 from picamera.array import PiRGBArray
 import argparse
 import sys
+import subprocess
+import getpass
+import requests
+import json
 
 import pyrebase
 
@@ -37,10 +41,31 @@ firebase = pyrebase.initialize_app(FIREBASE_CONFIG)
 database = firebase.database()
 firebaseStorage = firebase.storage();
 
-user = firebase.auth().sign_in_with_email_and_password("r@g.com","123456")
+shutDown = False
 
+while True:
+    print("In order to activate the camera, please enter a valid email and password.\nTo quit, please enter the letter q.")
+    email = input("Email: ")
+    if email == "q" or email == "Q":
+        shutDown = True
+        break;
+    password = getpass.getpass(prompt='Password: ', stream=None)
+    
+    try:
+        user = firebase.auth().sign_in_with_email_and_password(email, password)
+        print("Login success...\nWelcome :)")
+        break
+    except requests.exceptions.HTTPError as e:
+        error = json.loads((e.args(1))["error"])
+        errorMessage = "Login Failed...\nReason: "+error["message"]
+        print(errorMessage)
+        continue
 
-print("Firebase login success: "+user['localId'])
+#Stop the execution if user wants to shut down    
+if shutDown == True:
+    print("Shutting down...\nThank you.")
+    sys.exit(0)
+
 print("Packages import success!")
 
 
@@ -187,15 +212,6 @@ def detect():
     
 
 
-
-
-def startRecording():
-    camera.start_recording('/home/pi/Desktop/prj2019/videos/video.h264')
-    
-def stopRecording():
-    camera.stop_recording()
-
-
 GPIO.setmode(GPIO.BCM)
 
 PIR_PIN = 7
@@ -211,7 +227,7 @@ recording = False
 
 listOfDectedobjects = [];
 currentDateTimeString = ""
-fileName = ""
+fileNameAndLocation = ""
 while True:
     if GPIO.input(PIR_PIN):
         print("movement detected!")
@@ -219,8 +235,8 @@ while True:
             print("start recording")
             currentDateTime = datetime.now()
             currentDateTimeString = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            fileName = currentDateTimeString+".h264"
-            camera.start_recording('/home/pi/Desktop/prj2019/videos/'+fileName)
+            fileNameAndLocation = "../videos/"+currentDateTimeString+".mp4"
+            camera.start_recording('/home/pi/Desktop/prj2019/videos/temp.h264')
             
             recording = True
             
@@ -237,12 +253,16 @@ while True:
         print("Stop recording")
         if recording == True:
             camera.stop_recording()
-            #firebaseStorage.child(user['localId']).child(currentDateTimeString).put("../videos/"+fileName)
-            os.remove("../videos/"+fileName)
+            subprocess.run(["MP4Box", "-add", "../videos/temp.h264", fileNameAndLocation])
+            
+            firebaseStorage.child(user['localId']).child(currentDateTimeString).put(fileNameAndLocation)
+            
+            os.remove(fileNameAndLocation)
+            os.remove("../videos/temp.h264")
             recording = False
         
         if detection == True:
-            #database.child(user['localId']).push({"incedentDateAndtime":currentDateTimeString, "detectedObjects":listOfDetectedObjectsString})
+            database.child(user['localId']).push({"incedentDateAndtime":currentDateTimeString, "detectedObjects":listOfDetectedObjectsString})
             detection = False
 
 #camera.stop_preview();
