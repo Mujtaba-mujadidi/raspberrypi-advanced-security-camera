@@ -13,6 +13,10 @@ from picamera import PiCamera
 from picamera.array import PiRGBArray
 import argparse
 import sys
+import subprocess
+import getpass
+import requests
+import json
 
 import pyrebase
 
@@ -37,10 +41,31 @@ firebase = pyrebase.initialize_app(FIREBASE_CONFIG)
 database = firebase.database()
 firebaseStorage = firebase.storage();
 
-user = firebase.auth().sign_in_with_email_and_password("r@g.com","123456")
+shutDown = False
 
+while True:
+    print("In order to activate the camera, please enter a valid email and password.\nTo quit, please enter the letter q.")
+    email = input("Email: ")
+    if email == "q" or email == "Q":
+        shutDown = True
+        break;
+    password = getpass.getpass(prompt='Password: ', stream=None)
+    
+    try:
+        user = firebase.auth().sign_in_with_email_and_password(email, password)
+        print("Login success...\nWelcome :)")
+        break
+    except requests.exceptions.HTTPError as e:
+        error = json.loads((e.args(1))["error"])
+        errorMessage = "Login Failed...\nReason: "+error["message"]
+        print(errorMessage)
+        continue
 
-print("Firebase login success: "+user['localId'])
+#Stop the execution if user wants to shut down    
+if shutDown == True:
+    print("Shutting down...\nThank you.")
+    sys.exit(0)
+
 print("Packages import success!")
 
 
@@ -117,19 +142,25 @@ print ("PIR module test (CTR+C to exit)")
 
 isFirstDetectionInThisSession = True
 
+
+cameraFrameWidth = 340    #Use smaller resolution for
+cameraFrameHeight = 180
+
 camera = PiCamera()
-camera.resolution = (cameraFrameWidth,cameraFrameHeight)
+camera.resolution = (540,380)
 camera.framerate = 10
 
 def detect():
     global isFirstDetectionInThisSession
     global categoryIndex
     global camera
+    
+    listOFClassInFrame = []
     listOfDectedobjects = []
     
     print("Detection method called\Initialising the model...")
    
-    rawCapture = PiRGBArray(camera, size=(cameraFrameWidth,cameraFrameHeight))
+    rawCapture = PiRGBArray(camera, size=(540,380))
     rawCapture.truncate(0)
         
     timeInMilliSeconds = 0
@@ -138,6 +169,8 @@ def detect():
         timeInMilliSeconds = int(round(time.time() * 1000)) + 25000 #20 seconds from now. longer time as first intialistion takes  time
     else:
         timeInMilliSeconds = int(round(time.time() * 1000)) + 10000 #10 secinds from now. shorter time as subsequent calls are faster
+        
+    #camera.start_preview()
         
     print("Detection started...")
     for frame1 in camera.capture_continuous(rawCapture, format="bgr",use_video_port=True):
@@ -156,9 +189,15 @@ def detect():
             [detectionBoxes, detectionScores, detectionClasses, numberOfDetections],
             feed_dict={image_tensor: frame_expanded})
         
+        
         #global categoryIndex
         #print(object_id_to_class_mapper[classes[0]])
-        listOfDectedobjects.append(categoryIndex[1]["name"])
+        
+        #Filterout duplicates from the list of classes identified in this frame
+        listOFClassInFrame = list(set(classes[0])) 
+        
+        for classID in listOFClassInFrame:
+            listOfDectedobjects.append(categoryIndex[classID]["name"])
         
         if (int(round(time.time()*1000))) >= timeInMilliSeconds :
             isFirstDetectionInThisSession = False
@@ -171,15 +210,6 @@ def detect():
     cv2.destroyAllWindows()
     return listOfDectedobjects
     
-
-
-
-
-def startRecording():
-    camera.start_recording('/home/pi/Desktop/prj2019/videos/video.h264')
-    
-def stopRecording():
-    camera.stop_recording()
 
 
 GPIO.setmode(GPIO.BCM)
@@ -197,7 +227,7 @@ recording = False
 
 listOfDectedobjects = [];
 currentDateTimeString = ""
-fileName = ""
+fileNameAndLocation = ""
 while True:
     if GPIO.input(PIR_PIN):
         print("movement detected!")
@@ -205,18 +235,17 @@ while True:
             print("start recording")
             currentDateTime = datetime.now()
             currentDateTimeString = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            fileName = currentDateTimeString+".h264"
-            camera.start_recording('/home/pi/Desktop/prj2019/videos/'+fileName)
+            fileNameAndLocation = "../videos/"+currentDateTimeString+".mp4"
+            camera.start_recording('/home/pi/Desktop/prj2019/videos/temp.h264')
             
             recording = True
             
         if detection == False:
             listOfDectedobjects = detect(); 
-            print(listOfDectedobjects)
             listOfDectedobjects = list(set(listOfDectedobjects))
             listOfDetectedObjectsString = ','.join(listOfDectedobjects)
+            print(listOfDetectedObjectsString)
             detection = True
-          #  time.sleep(10)
         
         time.sleep(20)
             
@@ -224,8 +253,12 @@ while True:
         print("Stop recording")
         if recording == True:
             camera.stop_recording()
-            firebaseStorage.child(user['localId']).child(currentDateTimeString).put("../videos/"+fileName)
-            os.remove("../videos/"+fileName)
+            subprocess.run(["MP4Box", "-add", "../videos/temp.h264", fileNameAndLocation])
+            
+            firebaseStorage.child(user['localId']).child(currentDateTimeString).put(fileNameAndLocation)
+            
+            os.remove(fileNameAndLocation)
+            os.remove("../videos/temp.h264")
             recording = False
         
         if detection == True:
