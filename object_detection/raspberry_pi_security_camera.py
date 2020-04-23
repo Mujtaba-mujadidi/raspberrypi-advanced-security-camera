@@ -239,6 +239,7 @@ while True:
             listOfDectedobjects = list(set(listOfDectedobjects))
             listOfDetectedObjectsString = ','.join(listOfDectedobjects)
             #Store incident details in Firebase Database
+            print(listOfDetectedObjectsString)
             database.child("logs/"+user['localId']).push({"incedentDateAndtime":currentDateTimeString, "detectedObjects":listOfDetectedObjectsString})
 
             detection = True
