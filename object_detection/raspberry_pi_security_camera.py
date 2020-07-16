@@ -247,7 +247,7 @@ while True:
         time.sleep(20)
             
     else:
-        print("Stop recording")
+        print("No movement")
         if recording == True:
             camera.stop_recording()
             #Convert the temp.h264 video to mp4 format and store it in "fileNameAndLocation"
